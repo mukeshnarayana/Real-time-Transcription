@@ -1,0 +1,515 @@
+openapi: 3.0.3
+info:
+  title: Speech to Text API
+  version: 1.0.0
+  description: |
+    Real-time multilingual (Hindi + English) Speech-to-Text backend built with Express, Neon PostgreSQL, WebSockets, and the Gemini Live API.
+
+    ### No-Microphone Testing
+    Use `POST /api/transcribe/file` to upload a 16 kHz, mono, 16-bit PCM WAV file and test the full Gemini Live transcription pipeline without a microphone.
+
+    ### Real-Time WebSocket Protocol (`/ws/transcribe`)
+    Swagger UI cannot test WebSockets directly. Connect a WebSocket client to `ws://localhost:5000/ws/transcribe` (or `wss://<host>/ws/transcribe` in production):
+
+    - **Client -> Server (Text JSON frames):**
+      - `{ "type": "start", "language_hint": "auto" | "hi-IN" | "en-IN" }` *(optional, send immediately after connecting; defaults to `"auto"`)*
+      - `{ "type": "stop" }` *(ends the audio stream and closes the Gemini session)*
+    - **Client -> Server (Binary frames):**
+      - Raw PCM audio: 16-bit signed little-endian, 16 kHz, mono (`audio/pcm;rate=16000`).
+    - **Server -> Client (Text JSON frames):**
+      - `{ "type": "ready" }` — Gemini Live session is open and ready for audio
+      - `{ "type": "interim", "text": "..." }` — Partial live transcription update
+      - `{ "type": "final", "text": "..." }` — Finalized transcription segment
+      - `{ "type": "error", "message": "..." }` — Error notification
+      - `{ "type": "closed" }` — Gemini session closed
+
+    The WebSocket does not write to PostgreSQL; the client saves completed transcripts via `POST /api/transcriptions`.
+
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+  - url: https://your-backend.onrender.com
+    description: Deployed Render server
+
+tags:
+  - name: Health
+    description: Service and database health check
+  - name: Transcriptions
+    description: CRUD operations for saved transcriptions in Neon PostgreSQL
+  - name: Transcribe
+    description: Audio file upload transcription via Gemini Live API
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Checks API uptime and PostgreSQL connectivity by running `SELECT 1`.
+      responses:
+        '200':
+          description: Service health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/transcriptions:
+    get:
+      tags:
+        - Transcriptions
+      summary: List transcriptions
+      description: Returns a paginated, searchable, sortable list of saved transcriptions.
+      parameters:
+        - name: page
+          in: query
+          description: Page number (1-indexed)
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Page size (max 100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: q
+          in: query
+          description: Case-insensitive substring search in transcription text (`ILIKE`)
+          schema:
+            type: string
+            maxLength: 500
+        - name: sort
+          in: query
+          description: Column to sort by
+          schema:
+            type: string
+            enum:
+              - created_at
+              - updated_at
+            default: created_at
+        - name: order
+          in: query
+          description: Sort direction
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: desc
+      responses:
+        '200':
+          description: Paginated list of transcriptions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscriptionList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+    post:
+      tags:
+        - Transcriptions
+      summary: Create a transcription
+      description: Saves a completed transcription record into PostgreSQL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranscriptionCreate'
+            example:
+              text: "Namaste, aaj weather kaafi pleasant hai and we are testing speech to text."
+              language_hint: auto
+              source: live
+              duration_sec: 12
+      responses:
+        '201':
+          description: Transcription created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscriptionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/transcriptions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Positive integer transcription ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags:
+        - Transcriptions
+      summary: Get transcription by ID
+      responses:
+        '200':
+          description: Single transcription record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscriptionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+    put:
+      tags:
+        - Transcriptions
+      summary: Update a transcription
+      description: Updates `text` and/or `language_hint`. Automatically updates `updated_at`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranscriptionUpdate'
+            example:
+              text: "Namaste, aaj ka weather kaafi pleasant hai and we are testing speech to text."
+              language_hint: hi-IN
+      responses:
+        '200':
+          description: Updated transcription record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscriptionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+    delete:
+      tags:
+        - Transcriptions
+      summary: Delete a transcription
+      responses:
+        '204':
+          description: Transcription deleted (no content)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/transcribe/file:
+    post:
+      tags:
+        - Transcribe
+      summary: Transcribe an uploaded WAV file
+      description: |
+        Accepts a 16-bit PCM, mono, 16 kHz WAV file (max 10 MB) via multipart form upload (`audio`), streams the stripped PCM audio in 100 ms chunks to the Gemini Live API, and returns the finalized transcript.
+
+        Convert any audio file to the required WAV format with ffmpeg:
+        `ffmpeg -i input.m4a -ar 16000 -ac 1 -c:a pcm_s16le output.wav`
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - audio
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: WAV audio file (16-bit PCM, mono, 16 kHz, max 10 MB)
+                language_hint:
+                  type: string
+                  enum:
+                    - auto
+                    - hi-IN
+                    - en-IN
+                  default: auto
+                  description: Optional language hint (`auto` enables Hindi + English code-switching)
+                save:
+                  type: boolean
+                  default: false
+                  description: If true, saves the resulting transcript to PostgreSQL with `source="file"`
+      responses:
+        '200':
+          description: Transcription result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileTranscriptionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          description: Uploaded file exceeds 10 MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: Unsupported audio format (must be 16-bit PCM, mono, 16 kHz WAV)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          description: Upstream Gemini Live API failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Transcription timed out after 60 seconds
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    Transcription:
+      type: object
+      required:
+        - id
+        - text
+        - language_hint
+        - source
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          example: 1
+        text:
+          type: string
+          example: "Hello, kaise ho?"
+        language_hint:
+          type: string
+          enum:
+            - auto
+            - hi-IN
+            - en-IN
+          example: auto
+        source:
+          type: string
+          enum:
+            - live
+            - file
+          example: live
+        duration_sec:
+          type: integer
+          nullable: true
+          example: 12
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TranscriptionCreate:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 50000
+          example: "Namaste, aaj weather kaafi pleasant hai."
+        language_hint:
+          type: string
+          enum:
+            - auto
+            - hi-IN
+            - en-IN
+          default: auto
+        source:
+          type: string
+          enum:
+            - live
+            - file
+          default: live
+        duration_sec:
+          type: integer
+          minimum: 0
+          nullable: true
+
+    TranscriptionUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 50000
+        language_hint:
+          type: string
+          enum:
+            - auto
+            - hi-IN
+            - en-IN
+
+    TranscriptionResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/Transcription'
+
+    Pagination:
+      type: object
+      required:
+        - page
+        - limit
+        - total
+        - totalPages
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 10
+        total:
+          type: integer
+          example: 25
+        totalPages:
+          type: integer
+          example: 3
+
+    TranscriptionList:
+      type: object
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transcription'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    FileTranscriptionResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - text
+            - saved
+            - transcription
+          properties:
+            text:
+              type: string
+              example: "Namaste, this is a test recording."
+            saved:
+              type: boolean
+              example: false
+            transcription:
+              allOf:
+                - $ref: '#/components/schemas/Transcription'
+              nullable: true
+
+    Health:
+      type: object
+      required:
+        - status
+        - db
+        - uptime
+      properties:
+        status:
+          type: string
+          example: ok
+        db:
+          type: string
+          enum:
+            - up
+            - down
+          example: up
+        uptime:
+          type: integer
+          description: Process uptime in seconds
+          example: 42
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - message
+          properties:
+            message:
+              type: string
+              example: Validation failed
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+
+  responses:
+    BadRequest:
+      description: Invalid input or validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
