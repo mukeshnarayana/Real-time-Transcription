@@ -1,5 +1,5 @@
-const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
-export const WS_URL = import.meta.env.VITE_WS_URL || '';
+const API_URL = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+export const WS_URL = (import.meta.env.VITE_WS_URL || '').trim().replace(/\/+$/, '');
 
 const SLOW_THRESHOLD_MS = 5000;
 const slowListeners = new Set();

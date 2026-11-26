@@ -48,6 +48,6 @@ ffmpeg -i input.m4a -ar 16000 -ac 1 -c:a pcm_s16le output.wav
 
 1. Import the repository in Vercel and set the Root Directory to `frontend`.
 2. Add environment variables in Vercel Project Settings using `https://` and `wss://`:
-   - `VITE_API_URL=https://your-backend.onrender.com`
-   - `VITE_WS_URL=wss://your-backend.onrender.com/ws/transcribe`
+   - `VITE_API_URL=https://real-time-transcription-qfxp.onrender.com`
+   - `VITE_WS_URL=wss://real-time-transcription-qfxp.onrender.com/ws/transcribe`
 3. Deploy (`npm run build` outputs to `dist/`).
