@@ -1,5 +1,12 @@
-const API_URL = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
-export const WS_URL = (import.meta.env.VITE_WS_URL || '').trim().replace(/\/+$/, '');
+const DEFAULT_API_URL = 'https://real-time-transcription-qfxp.onrender.com';
+const DEFAULT_WS_URL = 'wss://real-time-transcription-qfxp.onrender.com/ws/transcribe';
+
+const API_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL)
+  .trim()
+  .replace(/\/+$/, '');
+export const WS_URL = (import.meta.env.VITE_WS_URL || DEFAULT_WS_URL)
+  .trim()
+  .replace(/\/+$/, '');
 
 const SLOW_THRESHOLD_MS = 5000;
 const slowListeners = new Set();
