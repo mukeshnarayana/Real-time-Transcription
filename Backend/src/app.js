@@ -7,7 +7,7 @@ import yaml from 'js-yaml';
 import morgan from 'morgan';
 import swaggerUi from 'swagger-ui-express';
 import { env } from './config/env.js';
-import { AppError, errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import healthRoutes from './routes/health.routes.js';
 import transcribeRoutes from './routes/transcribe.routes.js';
 import transcriptionsRoutes from './routes/transcriptions.routes.js';
@@ -19,6 +19,7 @@ app.set('trust proxy', 1);
 
 app.use(
   helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
       directives: {
         ...helmet.contentSecurityPolicy.getDefaultDirectives(),
@@ -31,30 +32,10 @@ app.use(
   })
 );
 
-const allowedOrigins = env.CLIENT_URL.split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
-
+// Allow requests from any frontend origin (e.g., localhost, Vercel, custom domains)
 app.use(
   cors({
-    origin(origin, callback) {
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      if (
-        env.NODE_ENV === 'development' &&
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
-      ) {
-        callback(null, true);
-        return;
-      }
-      callback(new AppError(403, `CORS origin not allowed: ${origin}`));
-    },
+    origin: true,
     credentials: true,
   })
 );

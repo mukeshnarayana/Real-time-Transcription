@@ -39,7 +39,7 @@ const envSchema = z.object({
     .string()
     .trim()
     .min(1)
-    .default('http://localhost:5173'),
+    .default('*'),
 });
 
 const parsed = envSchema.safeParse(process.env);
